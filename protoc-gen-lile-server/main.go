@@ -75,6 +75,23 @@ func main() {
 	gen(os.Stdin, os.Stdout)
 }
 
+func goPackageOption(s string) (path string, pkg string, ok bool) {
+	if s == "" {
+		return "", "", false
+	}
+	// A semicolon-delimited suffix delimits the import path and package name.
+	sc := strings.Index(s, ";")
+	if sc >= 0 {
+		return s[:sc], s[sc+1:], true
+	}
+	// The presence of a slash implies there's an import path.
+	slash := strings.LastIndex(s, "/")
+	if slash >= 0 {
+		return s, s[slash+1:], true
+	}
+	return "", s, true
+}
+
 func gen(i io.Reader, o io.Writer) {
 	input = i
 	output = o
@@ -100,11 +117,15 @@ func gen(i io.Reader, o io.Writer) {
 	imports := []goimport{}
 
 	for _, file := range req.ProtoFile {
-		pkgParts := strings.Split(file.GetOptions().GetGoPackage(), "/")
+		importPath, packageName, ok := goPackageOption(file.GetOptions().GetGoPackage())
+		if ok && importPath == "" {
+			importPath = packageName
+		}
+
 		imports = append(imports, goimport{
 			Package:   file.GetPackage(),
-			GoPackage: file.GetOptions().GetGoPackage(),
-			GoType:    pkgParts[len(pkgParts)-1],
+			GoPackage: importPath,
+			GoType:    packageName,
 		})
 
 		// Only generate methods for this file/project
@@ -120,14 +141,14 @@ func gen(i io.Reader, o io.Writer) {
 			log.Fatalf("No go_package option defined in %s", *file.Name)
 		}
 
-		pkgSplit := strings.Split(file.Options.GetGoPackage(), "/")
+		importPath, packageName, _ = goPackageOption(file.Options.GetGoPackage())
 
 		for _, service := range file.Service {
 			for _, method := range service.Method {
 				gm := grpcMethod{
 					ServiceName:     service.GetName(),
-					GoPackage:       file.Options.GetGoPackage(),
-					ImportName:      pkgSplit[len(pkgSplit)-1],
+					GoPackage:       importPath,
+					ImportName:      packageName,
 					Name:            method.GetName(),
 					InType:          toGoType(imports, method.GetInputType()),
 					OutType:         toGoType(imports, method.GetOutputType()),
@@ -162,7 +183,7 @@ func DedupImports(imports ...string) string {
 	n := set.Uniq(data)
 	imports = data[:n]
 
-	return fmt.Sprintf("\t\"%s\"", strings.Join(imports, "\"\n\t\""))
+	return fmt.Sprintf("\t%s", strings.Join(imports, "\n\t"))
 }
 
 func toGoType(imports []goimport, t string) string {
@@ -181,7 +202,7 @@ func toGoType(imports []goimport, t string) string {
 func inputImport(imports []goimport, method *descriptor.MethodDescriptorProto) string {
 	for _, i := range imports {
 		if strings.Contains(method.GetInputType(), i.Package) {
-			return i.GoPackage
+			return fmt.Sprintf("%s \"%s\"", i.GoType, i.GoPackage)
 		}
 	}
 
@@ -191,7 +212,7 @@ func inputImport(imports []goimport, method *descriptor.MethodDescriptorProto) s
 func outputImport(imports []goimport, method *descriptor.MethodDescriptorProto) string {
 	for _, i := range imports {
 		if strings.Contains(method.GetOutputType(), i.Package) {
-			return i.GoPackage
+			return fmt.Sprintf("%s \"%s\"", i.GoType, i.GoPackage)
 		}
 	}
 
