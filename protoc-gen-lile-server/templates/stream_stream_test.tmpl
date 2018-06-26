@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"context"
-  {{ dedupImports "github.com/stretchr/testify/assert" .InputImport }}
+  {{ dedupImports "\"github.com/stretchr/testify/assert\"" .InputImport }}
 )
 
 func Test{{ .Name }}(t *testing.T) {
